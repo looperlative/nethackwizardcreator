@@ -1,0 +1,10 @@
+OPTIONS=name:mywizardname-W, race:elf, align:chaotic, gender:female, catname:mycatname, number_pad:1
+OPTIONS=autopickup
+OPTIONS=pickup_burden:unencumbered
+OPTIONS=pickup_types:$?!/(%
+AUTOPICKUP_EXCEPTION="> corpse"
+AUTOPICKUP_EXCEPTION="<lichen corpse"
+AUTOPICKUP_EXCEPTION="<lizard corpse"
+AUTOPICKUP_EXCEPTION="<newt corpse"
+AUTOPICKUP_EXCEPTION="<floating eye corpse"
+AUTOPICKUP_EXCEPTION="<wraith corpse"
