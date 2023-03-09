@@ -1,0 +1,129 @@
+#! /usr/bin/python3
+#
+# Copyright 2023 Robert Amstadt
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
+#
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the distribution.
+# 3. Neither the name of the copyright holder nor the names of its
+#    contributors may be used to endorse or promote products derived from
+#    this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+# FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+# COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+# INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+# ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+
+import subprocess
+import re
+import os
+import pty
+import sys
+import time
+import contextlib
+
+NOPRINT_TRANS_TABLE = {
+    i: None for i in range(0, sys.maxunicode + 1) if not chr(i).isprintable()
+}
+
+stats_re = r'St:([0-9]+) Dx:([0-9]+) Co:([0-9]+) In:([0-9]+) Wi:([0-9]+) Ch:([0-9]+) '
+spellbook_re = r'spellbook of identify'
+ring_re = r'ring of slow digestion'
+
+def do_quit_nethack(ppty):
+    os.write(ppty, b'#')
+    os.write(ppty, b'q')
+    os.write(ppty, b'\r')
+
+def make_printable(s):
+    """Replace non-printable characters in a string."""
+
+    # the translate method on str removes characters
+    # that map to None from the string
+    return s.translate(NOPRINT_TRANS_TABLE)
+
+has_identify = False
+has_slow_digestion = False
+
+while not (has_identify and has_slow_digestion):
+    ppty, spty = pty.openpty()
+    os.set_blocking(ppty, False)
+
+    nh = subprocess.Popen(['nethack'], stdin=spty, stdout=spty, stderr=spty)
+
+    has_identify = False
+    has_slow_digestion = False
+    intelligence = 0
+    want_inventory = True
+    quit_nethack = False
+    not_done = True
+
+    while not_done:
+        try:
+            with contextlib.suppress(BlockingIOError):
+                s = make_printable(os.read(ppty, 1000).decode())
+                print(s)
+                sys.stdout.flush()
+
+                m = re.search(stats_re, s)
+                if m:
+                    intelligence = int(m.group(4))
+                    print('Intelligence: {}'.format(intelligence))
+                    time.sleep(0.5)
+                    if quit_nethack:
+                        print("quit")
+                        quit_nethack = False
+                        do_quit_nethack(ppty)
+                    elif has_identify and has_slow_digestion:
+                        print("save")
+                        os.write(ppty, b'S')
+                    elif want_inventory:
+                        print("inventory")
+                        os.write(ppty, b'i')
+
+                if re.search(spellbook_re, s):
+                    has_identify = True
+                if re.search(ring_re, s):
+                    has_slow_digestion = True
+
+                if re.search(r'--More--$', s):
+                    os.write(ppty, b'\r')
+                elif re.search(r'\(1 of 2\)', s):
+                    os.write(ppty, b' ')
+                elif re.search(r'\(2 of 2\)', s):
+                    os.write(ppty, b'\r')
+                elif re.search(r'\(end\) $', s):
+                    want_inventory = False
+                    if not (has_identify and has_slow_digestion):
+                        quit_nethack = True
+                        print('Identify {}, Slow digestion {}'.format(has_identify,
+                                                                      has_slow_digestion))
+                    time.sleep(0.5)
+                    os.write(ppty, b'\x1b')
+                elif re.search(r'Really quit', s):
+                    os.write(ppty, b'y')
+                elif re.search(r'Really save', s):
+                    os.write(ppty, b'y')
+                elif re.search(r'Be seeing you', s):
+                    sys.exit()
+                elif re.search(r'You didn\'t beat your previous score', s):
+                    not_done = False
+                elif re.search(r'Do you want your possessions identified', s):
+                    os.write(ppty, b'q')
+
+        except KeyboardInterrupt:
+            os.write(ppty, b'\x03')
